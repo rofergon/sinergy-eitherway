@@ -1,10 +1,17 @@
-import { BIRDEYE_API_KEY, PROXY_API } from '../config'
+import { BIRDEYE_API_KEY, PROXY_API } from '../config.js'
 
 const BIRDEYE_BASE = 'https://public-api.birdeye.so'
 
 // Cache to avoid hammering the API.
 const cache = new Map()
-const CACHE_TTL = 45_000
+const inFlight = new Map()
+const DEFAULT_CACHE_TTL = 2 * 60_000
+const OHLCV_CACHE_TTL = 5 * 60_000
+const BIRDEYE_FREE_TIER_INTERVAL = 200
+const BIRDEYE_MAX_RETRIES = 2
+
+let requestQueue = Promise.resolve()
+let lastRequestAt = 0
 
 const CHART_PERIODS = {
   '1H': { candleType: '1m', seconds: 60 * 60, limit: 60 },
@@ -13,36 +20,91 @@ const CHART_PERIODS = {
   '1M': { candleType: '4H', seconds: 30 * 24 * 60 * 60, limit: 180 },
 }
 
-function cached(key, fn) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function retryDelay(res, attempt) {
+  const retryAfter = res.headers?.get?.('retry-after')
+  if (retryAfter) {
+    const seconds = Number(retryAfter)
+    if (Number.isFinite(seconds)) return Math.max(seconds * 1000, BIRDEYE_FREE_TIER_INTERVAL)
+
+    const dateMs = Date.parse(retryAfter)
+    if (Number.isFinite(dateMs)) return Math.max(dateMs - Date.now(), BIRDEYE_FREE_TIER_INTERVAL)
+  }
+
+  return (attempt + 1) * 4_000
+}
+
+function enqueueBirdeyeRequest(fn) {
+  const run = requestQueue.then(async () => {
+    const elapsed = Date.now() - lastRequestAt
+    if (elapsed < BIRDEYE_FREE_TIER_INTERVAL) {
+      await sleep(BIRDEYE_FREE_TIER_INTERVAL - elapsed)
+    }
+
+    try {
+      return await fn()
+    } finally {
+      lastRequestAt = Date.now()
+    }
+  })
+
+  requestQueue = run.catch(() => {})
+  return run
+}
+
+function cached(key, fn, ttl = DEFAULT_CACHE_TTL) {
   const hit = cache.get(key)
-  if (hit && Date.now() - hit.ts < CACHE_TTL) return Promise.resolve(hit.data)
-  return fn().then((data) => {
+  if (hit && Date.now() - hit.ts < ttl) return Promise.resolve(hit.data)
+
+  const pending = inFlight.get(key)
+  if (pending) return pending
+
+  const promise = fn().then((data) => {
     cache.set(key, { data, ts: Date.now() })
     return data
+  }).finally(() => {
+    inFlight.delete(key)
   })
+
+  inFlight.set(key, promise)
+  return promise
 }
 
 async function birdeyeFetch(path, options = {}) {
-  const url = `${BIRDEYE_BASE}${path}`
-  const headers = {
-    Accept: 'application/json',
-    'x-chain': options.chain || 'solana',
-  }
+  return enqueueBirdeyeRequest(async () => {
+    const url = `${BIRDEYE_BASE}${path}`
+    const headers = {
+      Accept: 'application/json',
+      'x-chain': options.chain || 'solana',
+    }
 
-  if (BIRDEYE_API_KEY) headers['X-API-KEY'] = BIRDEYE_API_KEY
+    if (BIRDEYE_API_KEY) headers['X-API-KEY'] = BIRDEYE_API_KEY
 
-  const directRes = BIRDEYE_API_KEY
-    ? await fetch(url, { headers }).catch((error) => ({ directError: error }))
-    : null
+    for (let attempt = 0; attempt <= BIRDEYE_MAX_RETRIES; attempt += 1) {
+      const directRes = BIRDEYE_API_KEY
+        ? await fetch(url, { headers }).catch((error) => ({ directError: error }))
+        : null
 
-  const res = directRes && !directRes.directError
-    ? directRes
-    : await fetch(PROXY_API(url), { headers: { Accept: 'application/json' } })
+      const res = directRes && !directRes.directError
+        ? directRes
+        : await fetch(PROXY_API(url), { headers: { Accept: 'application/json' } })
 
-  if (!res.ok) throw new Error(`Birdeye ${res.status}: ${path}`)
-  const json = await res.json()
-  if (!json.success) throw new Error(json.message || 'Birdeye error')
-  return json.data
+      if (res.status === 429 && attempt < BIRDEYE_MAX_RETRIES) {
+        await sleep(retryDelay(res, attempt))
+        continue
+      }
+
+      if (!res.ok) throw new Error(`Birdeye ${res.status}: ${path}`)
+      const json = await res.json()
+      if (!json.success) throw new Error(json.message || 'Birdeye error')
+      return json.data
+    }
+
+    throw new Error(`Birdeye rate limit: ${path}`)
+  })
 }
 
 function normalizeCandle(item) {
@@ -97,7 +159,7 @@ export async function getTokenOHLCV(address, period = '1D') {
       .filter(Boolean)
       .sort((a, b) => a.unixTime - b.unixTime)
       .slice(-config.limit)
-  })
+  }, OHLCV_CACHE_TTL)
 }
 
 // The backtest engine expects [{ unixTime, value }], so expose OHLCV closes in that shape.
@@ -121,7 +183,7 @@ export async function getHistoricalPrices(address, type = '1D', limit = 30) {
       .sort((a, b) => a.unixTime - b.unixTime)
       .slice(-limit)
       .map((item) => ({ unixTime: item.unixTime, value: item.close }))
-  })
+  }, OHLCV_CACHE_TTL)
 }
 
 export async function getMultipleTokenPrices(addresses) {
