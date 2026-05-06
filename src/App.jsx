@@ -7,6 +7,7 @@ import StrategyBuilder from './pages/StrategyBuilder'
 import Backtest from './pages/Backtest'
 import Receipts from './pages/Receipts'
 import Markets from './pages/Markets'
+import StrategyAgent from './pages/StrategyAgent'
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="/backtest" element={<Backtest />} />
           <Route path="/receipts" element={<Receipts />} />
           <Route path="/markets" element={<Markets />} />
+          <Route path="/agent" element={<StrategyAgent />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>
