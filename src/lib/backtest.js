@@ -1,4 +1,6 @@
-import { getHistoricalPrices, getTokenOverview } from './birdeye'
+import { TOKEN_LIST, TOKENS } from '../config'
+import { getHistoricalPrices, getTokenOHLCV } from './birdeye'
+import { isPineLikeScript, parsePineLikeStrategy, runPineBacktest } from './pineBacktest'
 
 /**
  * Run a backtest using Birdeye historical price data.
@@ -6,6 +8,10 @@ import { getHistoricalPrices, getTokenOverview } from './birdeye'
  */
 export async function runBacktest(rules, portfolioSize = 1000) {
   const results = []
+
+  if (rules.engine?.sourceType === 'pine_like_v0' || isPineLikeScript(rules.script || '')) {
+    return runPineLikeBacktest(rules, portfolioSize)
+  }
 
   for (const token of rules.tokens.slice(0, 3)) {
     try {
@@ -23,6 +29,79 @@ export async function runBacktest(rules, portfolioSize = 1000) {
 
   const combined = aggregateResults(results, portfolioSize)
   return combined
+}
+
+async function runPineLikeBacktest(rules, portfolioSize) {
+  const ast = parsePineLikeStrategy(rules.script)
+  const token = rules.tokens?.[0] || TOKEN_LIST.find((t) => t.symbol === ast.tokenSymbol) || TOKENS.SOL
+
+  try {
+    const rawCandles = await getTokenOHLCV(token.address, ast.timeframe || '1D')
+    const candles = normalizeCandles(rawCandles)
+    if (candles.length < 30) throw new Error('Not enough OHLCV candles')
+
+    const result = runPineBacktest({
+      script: rules.script,
+      token,
+      candles,
+      portfolioSize,
+      allocation: rules.allocation || 100,
+      stopLoss: rules.stopLoss || 10,
+      takeProfit: rules.takeProfit || 30,
+      trailingStop: rules.trailingStop || 0,
+      maxBars: rules.maxBars || 0,
+    })
+
+    return aggregateResults([result], portfolioSize, 'Pine-like OHLCV Backtest')
+  } catch {
+    const result = runPineBacktest({
+      script: rules.script,
+      token,
+      candles: syntheticCandles(rules.riskLevel || 'medium'),
+      portfolioSize,
+      allocation: rules.allocation || 100,
+      stopLoss: rules.stopLoss || 10,
+      takeProfit: rules.takeProfit || 30,
+      trailingStop: rules.trailingStop || 0,
+      maxBars: rules.maxBars || 0,
+    })
+    return aggregateResults([{ ...result, synthetic: true }], portfolioSize, 'Pine-like Synthetic OHLCV')
+  }
+}
+
+function normalizeCandles(candles = []) {
+  return candles
+    .map((c) => ({
+      ts: c.unixTime,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume || 0,
+    }))
+    .filter((c) => [c.ts, c.open, c.high, c.low, c.close].every((v) => Number.isFinite(v)))
+    .sort((a, b) => a.ts - b.ts)
+}
+
+function syntheticCandles(riskLevel = 'medium') {
+  const volatility = riskLevel === 'high' ? 0.055 : riskLevel === 'low' ? 0.015 : 0.028
+  const now = Math.floor(Date.now() / 1000)
+  const candles = []
+  let close = 100
+  for (let i = 0; i < 120; i += 1) {
+    const open = close
+    const drift = 0.0008
+    close = Math.max(1, close * (1 + drift + (Math.random() - 0.48) * volatility))
+    candles.push({
+      ts: now - (120 - i) * 86400,
+      open,
+      high: Math.max(open, close) * (1 + Math.random() * volatility * 0.4),
+      low: Math.min(open, close) * (1 - Math.random() * volatility * 0.4),
+      close,
+      volume: 100000 + Math.random() * 500000,
+    })
+  }
+  return candles
 }
 
 function simulateStrategy(token, prices, rules, portfolioSize) {
@@ -183,7 +262,7 @@ function generateSyntheticResult(token, rules, portfolioSize) {
   }
 }
 
-function aggregateResults(results, portfolioSize) {
+function aggregateResults(results, portfolioSize, sourceLabel) {
   if (results.length === 0) return null
 
   const avgReturn = results.reduce((a, r) => a + r.metrics.totalReturn, 0) / results.length
@@ -214,7 +293,9 @@ function aggregateResults(results, portfolioSize) {
       avgWinRate: Math.round(avgWinRate * 10) / 10,
       sharpe: Math.round(avgSharpe * 100) / 100,
       maxDrawdown: Math.round(maxDD * 10) / 10,
-      dataSource: results.some((r) => !r.synthetic) ? 'Birdeye Live Data' : 'Synthetic (Birdeye unavailable)',
+      profitFactor: Math.round((results.reduce((a, r) => a + (r.metrics.profitFactor || 0), 0) / results.length) * 1000) / 1000,
+      exposurePct: Math.round((results.reduce((a, r) => a + (r.metrics.exposurePct || 0), 0) / results.length) * 10) / 10,
+      dataSource: sourceLabel || (results.some((r) => !r.synthetic) ? 'Birdeye Live Data' : 'Synthetic (Birdeye unavailable)'),
     },
   }
 }

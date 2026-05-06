@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   ResponsiveContainer,
@@ -12,6 +12,10 @@ import {
 } from 'recharts'
 import { parseStrategy } from '../lib/strategyParser'
 import { runBacktest } from '../lib/backtest'
+import { DEFAULT_PINE_SCRIPT, isPineLikeScript, parsePineLikeStrategy } from '../lib/pineBacktest'
+import { TOKEN_LIST, TOKENS } from '../config'
+import ManualStrategyBuilder from '../components/ManualStrategyBuilder'
+import { createManualDraft } from '../lib/manualStrategy'
 
 const PORTFOLIO_SIZES = [500, 1000, 5000, 10000, 50000]
 
@@ -39,7 +43,12 @@ function CustomTooltip({ active, payload, label }) {
 
 export default function Backtest() {
   const [searchParams] = useSearchParams()
-  const [prompt, setPrompt] = useState(() => searchParams.get('prompt') || '')
+  const [mode, setMode] = useState(() => {
+    const initialPrompt = searchParams.get('prompt')
+    return initialPrompt ? (isPineLikeScript(initialPrompt) ? 'pine' : 'prompt') : 'manual'
+  })
+  const [prompt, setPrompt] = useState(() => searchParams.get('prompt') || DEFAULT_PINE_SCRIPT)
+  const [manualDraft, setManualDraft] = useState(() => createManualDraft())
   const [portfolio, setPortfolio] = useState(1000)
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState(null)
@@ -61,7 +70,7 @@ export default function Backtest() {
     setResult(null)
     setError(null)
     try {
-      const rules = parseStrategy(prompt)
+      const rules = mode === 'prompt' ? parseStrategy(prompt) : buildPineRules(prompt, manualDraft)
       const backtestResult = await runBacktest(rules, portfolio)
       setResult({ rules, ...backtestResult })
       setSelectedToken(0)
@@ -81,27 +90,62 @@ export default function Backtest() {
 
   const displayData = selectedToken === -1 ? merged : (tokenResults[selectedToken]?.equityCurve || merged)
 
+  const handleManualChange = useCallback((script, draft) => {
+    setPrompt(script)
+    setManualDraft(draft)
+  }, [])
+
   return (
     <div className="space-y-5 animate-fade-in">
       <div>
         <h1 className="text-xl font-bold text-sinergy-text">Backtest Engine</h1>
         <p className="text-sinergy-muted text-xs mt-0.5">
-          Simulate your strategy against up to 60 days of Birdeye historical price data.
+          Simulate natural-language strategies or Pine-like scripts against Birdeye historical data.
         </p>
       </div>
 
       {/* Configuration */}
-      <div className="bg-sinergy-surface border border-sinergy-border rounded-xl p-4 space-y-4">
-        <div>
-          <label className="block text-xs font-semibold text-sinergy-text mb-2">Strategy Description</label>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={3}
-            placeholder="Buy SOL on every 10% dip, allocate 15% of portfolio, stop loss at 12%, take profit at 35%..."
-            className="w-full bg-sinergy-bg border border-sinergy-border rounded-lg px-3 py-2 text-sinergy-text text-sm placeholder-sinergy-muted/50 resize-none focus:border-sinergy-accent/60 transition-all font-mono"
-          />
+      <div className={mode === 'manual' ? 'space-y-4' : 'bg-sinergy-surface border border-sinergy-border rounded-xl p-4 space-y-4'}>
+        <div className="flex flex-wrap gap-2">
+          {[
+            { id: 'manual', label: 'Manual builder' },
+            { id: 'pine', label: 'Pine-like' },
+            { id: 'prompt', label: 'Natural language' },
+          ].map((item) => (
+            <button
+              key={item.id}
+              onClick={() => {
+                setMode(item.id)
+                if (item.id === 'pine' && !isPineLikeScript(prompt)) setPrompt(DEFAULT_PINE_SCRIPT)
+                if (item.id === 'prompt' && isPineLikeScript(prompt)) setPrompt('Buy SOL on every 10% dip, allocate 15% of portfolio, stop loss at 12%, take profit at 35%')
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-all ${
+                mode === item.id
+                  ? 'bg-sinergy-accent text-white'
+                  : 'bg-sinergy-bg border border-sinergy-border text-sinergy-muted hover:text-sinergy-text'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
+
+        {mode === 'manual' ? (
+          <ManualStrategyBuilder initialDraft={manualDraft} onChange={handleManualChange} />
+        ) : (
+          <div>
+            <label className="block text-xs font-semibold text-sinergy-text mb-2">
+              {mode === 'pine' ? 'Pine-like Strategy Script' : 'Strategy Description'}
+            </label>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={mode === 'pine' ? 12 : 3}
+              placeholder={mode === 'pine' ? DEFAULT_PINE_SCRIPT : 'Buy SOL on every 10% dip, allocate 15% of portfolio, stop loss at 12%, take profit at 35%...'}
+              className="w-full bg-sinergy-bg border border-sinergy-border rounded-lg px-3 py-2 text-sinergy-text text-sm placeholder-sinergy-muted/50 resize-none focus:border-sinergy-accent/60 transition-all font-mono"
+            />
+          </div>
+        )}
 
         <div>
           <label className="block text-xs font-semibold text-sinergy-text mb-2">
@@ -194,7 +238,9 @@ export default function Backtest() {
           {/* Strategy Info */}
           <div className="bg-sinergy-surface border border-sinergy-border rounded-xl p-4">
             <h3 className="text-xs font-semibold text-sinergy-text mb-2">Parsed Strategy</h3>
-            <div className="font-mono text-xs text-sinergy-muted bg-sinergy-bg rounded px-3 py-2">{result.rules?.summary}</div>
+            <div className="font-mono text-xs text-sinergy-muted bg-sinergy-bg rounded px-3 py-2 whitespace-pre-wrap">
+              {result.rules?.summary}
+            </div>
           </div>
 
           {/* Chart */}
@@ -277,7 +323,7 @@ export default function Backtest() {
                         { l: 'P&L', v: `$${r.metrics.totalPnL}`, c: r.metrics.totalPnL >= 0 ? 'text-sinergy-green' : 'text-sinergy-red' },
                         { l: 'Win Rate', v: `${r.metrics.winRate}%`, c: 'text-sinergy-text' },
                         { l: 'Trades', v: r.metrics.totalTrades, c: 'text-sinergy-text' },
-                        { l: 'Sharpe', v: r.metrics.sharpe, c: 'text-sinergy-text' },
+                        { l: r.pine ? 'Profit Factor' : 'Sharpe', v: r.pine ? r.metrics.profitFactor : r.metrics.sharpe, c: 'text-sinergy-text' },
                         { l: 'Max DD', v: `${r.metrics.maxDrawdown}%`, c: 'text-sinergy-amber' },
                       ].map((m) => (
                         <div key={m.l} className="bg-sinergy-bg rounded-lg p-2">
@@ -317,4 +363,31 @@ export default function Backtest() {
       )}
     </div>
   )
+}
+
+function buildPineRules(script, manualDraft) {
+  const ast = parsePineLikeStrategy(script)
+  const token = TOKEN_LIST.find((item) => item.symbol.toUpperCase() === ast.tokenSymbol) || TOKENS.SOL
+  return {
+    tokens: [token],
+    actions: ast.enabledSides.includes('short') ? ['LONG', 'SHORT'] : ['LONG'],
+    triggers: [{ type: 'PINE_SCRIPT', value: 1 }],
+    allocation: manualDraft?.allocation || 100,
+    stopLoss: manualDraft?.stopLoss || 10,
+    takeProfit: manualDraft?.takeProfit || 30,
+    maxBars: manualDraft?.maxBars || 0,
+    trailingStop: manualDraft?.trailingStop || 0,
+    riskLevel: ast.enabledSides.includes('short') ? 'high' : 'medium',
+    timeHorizon: 'systematic',
+    isDCA: false,
+    script,
+    engine: { sourceType: 'pine_like_v0', script },
+    summary: [
+      `Pine-like ${ast.tokenSymbol} strategy`,
+      `Timeframe: ${ast.timeframe}`,
+      `Sides: ${ast.enabledSides.join(', ') || 'long'}`,
+      '',
+      script,
+    ].join('\n'),
+  }
 }
