@@ -16,6 +16,12 @@ export default defineConfig({
       interval: 1000,
     },
     allowedHosts: true,
+    proxy: {
+      '/agent': {
+        target: 'http://127.0.0.1:8790',
+        changeOrigin: true,
+      },
+    },
   },
 
 })
