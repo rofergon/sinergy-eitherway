@@ -5,18 +5,26 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:agent": "node services/strategy-agent/index.js",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:agent": "node --test services/strategy-agent/strategyTools.test.js"
   },
   "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@langchain/openai": "^1.4.1",
     "@solana/web3.js": "^1.98.0",
     "@supabase/supabase-js": "^2.49.4",
     "bs58": "^5.0.0",
+    "dotenv": "^16.6.1",
+    "fastify": "^5.6.0",
+    "langchain": "^1.2.39",
     "recharts": "^2.15.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.30.0",
-    "tweetnacl": "^1.0.3"
+    "tweetnacl": "^1.0.3",
+    "zod": "^4.1.11"
   },
   "devDependencies": {
     "@types/react": "^18.3.20",
