@@ -1,6 +1,6 @@
-import { TOKEN_LIST, TOKENS } from '../config'
-import { getHistoricalPrices, getTokenOHLCV } from './birdeye'
-import { isPineLikeScript, parsePineLikeStrategy, runPineBacktest } from './pineBacktest'
+import { TOKEN_LIST, TOKENS } from '../config.js'
+import { getHistoricalPrices, getTokenOHLCV } from './birdeye.js'
+import { isPineLikeScript, parsePineLikeStrategy, runPineBacktest } from './pineBacktest.js'
 
 /**
  * Run a backtest using Birdeye historical price data.
