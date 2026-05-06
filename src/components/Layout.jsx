@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { path: '/', label: 'Dashboard', icon: GridIcon },
   { path: '/markets', label: 'Markets', icon: ChartIcon },
   { path: '/strategy', label: 'Strategy', icon: BrainIcon },
+  { path: '/agent', label: 'Agent', icon: AgentIcon },
   { path: '/backtest', label: 'Backtest', icon: TestIcon },
   { path: '/receipts', label: 'Receipts', icon: ReceiptIcon },
 ]
@@ -35,6 +36,14 @@ function TestIcon() {
   return (
     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5" />
+    </svg>
+  )
+}
+function AgentIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2m5-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8.5 9.5h.01M15.5 9.5h.01M9 15c1.5 1 4.5 1 6 0" />
     </svg>
   )
 }
