@@ -1,5 +1,8 @@
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.eitherway.ai'
-export const BIRDEYE_API_KEY = import.meta.env.VITE_API_KEY_BIRDEYE || ''
+const env = import.meta.env || {}
+
+export const API_BASE_URL = env.VITE_API_BASE_URL || 'https://api.eitherway.ai'
+export const BIRDEYE_API_KEY = env.VITE_API_KEY_BIRDEYE || process.env.BIRDEYE_API_KEY || ''
+export const AGENT_URL = env.VITE_AGENT_URL || '/agent'
 
 export const PROXY_API = (url) =>
   `${API_BASE_URL}/api/proxy-api?url=${encodeURIComponent(url)}`
