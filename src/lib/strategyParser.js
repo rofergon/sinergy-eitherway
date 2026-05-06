@@ -1,4 +1,4 @@
-import { TOKENS, TOKEN_LIST } from '../config'
+import { TOKENS, TOKEN_LIST } from '../config.js'
 
 /**
  * Parse a natural-language DeFi strategy prompt into structured rules.
